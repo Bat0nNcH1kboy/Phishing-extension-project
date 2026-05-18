@@ -1,0 +1,29 @@
+{
+  "dataset_size": 513,
+  "safe_count": 255,
+  "phishing_count": 258,
+  "test_size": 129,
+  "accuracy": 1.0,
+  "precision": 1.0,
+  "recall": 1.0,
+  "f1": 1.0,
+  "confusion_matrix": [
+    [
+      64,
+      0
+    ],
+    [
+      0,
+      65
+    ]
+  ],
+  "cv_accuracy_mean": 0.9961,
+  "cv_accuracy_scores": [
+    0.9903,
+    1.0,
+    1.0,
+    0.9902,
+    1.0
+  ],
+  "note": "Educational synthetic/demo dataset; metrics are not a production guarantee."
+}

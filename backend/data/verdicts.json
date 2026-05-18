@@ -1,0 +1,6 @@
+{
+  "example.com": {"verdict": "safe", "comment": "демонстрационный безопасный домен"},
+  "google.com": {"verdict": "safe", "comment": "пример доверенного домена"},
+  "test-phishing.local": {"verdict": "phishing", "comment": "демонстрационный фишинговый домен"},
+  "secure-login-example.bad": {"verdict": "phishing", "comment": "учебный пример опасного домена"}
+}

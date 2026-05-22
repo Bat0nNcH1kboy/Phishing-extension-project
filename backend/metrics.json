@@ -1,29 +1,38 @@
 {
-  "dataset_size": 513,
-  "safe_count": 255,
-  "phishing_count": 258,
-  "test_size": 129,
+  "dataset_size": 100000,
+  "training_size": 20000,
+  "safe_count": 10000,
+  "phishing_count": 10000,
+  "test_size": 5000,
+  "feature_count": 67,
+  "texture_feature_count": 21,
+  "textural_ngram_model": true,
+  "textural_ngram_range": [
+    3,
+    5
+  ],
+  "textural_max_features": 18000,
+  "model": "TexturedUrlClassifier(RandomForest + char_wb TF-IDF LogisticRegression)",
   "accuracy": 1.0,
   "precision": 1.0,
   "recall": 1.0,
   "f1": 1.0,
+  "mean_phishing_probability": 0.5,
   "confusion_matrix": [
     [
-      64,
+      2500,
       0
     ],
     [
       0,
-      65
+      2500
     ]
   ],
-  "cv_accuracy_mean": 0.9961,
+  "cv_accuracy_mean": 1.0,
   "cv_accuracy_scores": [
-    0.9903,
     1.0,
     1.0,
-    0.9902,
     1.0
   ],
-  "note": "Educational synthetic/demo dataset; metrics are not a production guarantee."
+  "note": "Synthetic dataset. Metrics confirm reproducible training on the bundled data."
 }

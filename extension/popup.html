@@ -8,13 +8,25 @@
 </head>
 <body>
   <main class="container">
-    <header>
-      <h1>Проверка сайта</h1>
-      <p id="url" class="url">URL не определён</p>
+    <header class="hero">
+      <div class="shield">🛡️</div>
+      <div>
+        <h1>Антифишинг</h1>
+        <p>Гибридная проверка URL: база 100k, ML, текстуры URL, эвристика и DNS</p>
+      </div>
     </header>
+
+    <section class="card">
+      <label for="manualUrl">URL для проверки</label>
+      <textarea id="manualUrl" rows="3" spellcheck="false" placeholder="URL активной вкладки появится здесь"></textarea>
+      <div class="actions">
+        <button id="checkCurrentBtn" type="button">Проверить вкладку</button>
+        <button id="checkManualBtn" type="button" class="secondary">Проверить введённый URL</button>
+      </div>
+    </section>
+
     <section id="result" class="status unknown">Ожидание проверки...</section>
     <section id="details" class="details"></section>
-    <button id="checkBtn" type="button">Проверить заново</button>
   </main>
   <script src="popup.js"></script>
 </body>

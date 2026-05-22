@@ -1,0 +1,31 @@
+Финальная проверка проекта v4
+
+1) Проверка технической готовности: scripts/release_audit.py
+Результат: 10/10 прогонов OK.
+См. CHECK_10_RUNS.txt.
+
+2) Полная автоматическая проверка: python scripts/check_project.py
+Результат: OK
+- python -m compileall backend: OK
+- python -m pytest -q: 64 passed
+- python scripts/release_audit.py: OK
+- node --check extension/popup.js: OK
+- node --check extension/background.js: OK
+
+3) Проверка запуска backend
+Результат: OK
+- backend запустился на http://127.0.0.1:5001
+- GET /health вернул status=ok, model_loaded=true, verdict_base_size=100000
+- POST /api/check для подозрительного неизвестного URL вернул source=hybrid, model_source=ml_textured, verdict=phishing, phishing_probability=0.944
+
+4) Ключевые показатели проекта
+- dataset.csv: 100000 URL, 50000 safe / 50000 phishing
+- verdicts.json: 100000 записей, 50000 safe / 50000 phishing
+- URL-признаки: 67 всего, из них 21 текстурный признак
+- тестовые файлы: 11
+- явные test-функции: 57
+- итог pytest с параметризацией: 64 passed
+- DNS-проверка: backend/dns_checker.py, включена по умолчанию
+- CI: .github/workflows/ci.yml
+- ручной ввод URL: extension/popup.html + extension/popup.js
+- чек-лист запуска: docs/DEMO_CHECKLIST.md

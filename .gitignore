@@ -1,6 +1,4 @@
 .venv/
-.venv-py39-backup/
 __pycache__/
 .pytest_cache/
 *.pyc
-README.md

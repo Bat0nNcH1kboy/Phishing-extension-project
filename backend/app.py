@@ -11,13 +11,19 @@ from config import (
     API_PORT,
     CORS_ALLOWED_ORIGINS,
     DEMO_ENDPOINTS_ENABLED,
+    DNS_CHECK_ENABLED,
+    DNS_TIMEOUT_SECONDS,
     FEATURES_PATH,
     INCLUDE_DEBUG_FEATURES,
     MODEL_PATH,
     VERDICTS_PATH,
+    VERDICTS_SAMPLE_LIMIT,
 )
-from feature_extractor import extract_domain, normalize_url
+from dns_checker import resolve_domain
+from feature_extractor import extract_domain, extract_features, normalize_url
+from url_texture import summarize_texture_features
 from model_service import ModelService
+from risk_engine import RiskEngine
 from verdict_repository import VerdictRepository
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -34,10 +40,24 @@ def _validation_error(message: str, raw_url: str, status: int = 400):
         "reasons": [message],
         "normalized_url": raw_url,
         "domain": "",
+        "checks": {
+            "ml_probability": None,
+            "heuristic_score": None,
+            "dns_checked": False,
+            "dns_resolvable": None,
+            "model_source": None,
+        },
     }), status
 
 
-def create_app() -> Flask:
+def _bool_arg(name: str, default: bool) -> bool:
+    raw = request.args.get(name)
+    if raw is None:
+        return default
+    return raw.lower() in {"1", "true", "yes", "on"}
+
+
+def create_app(enable_dns_check: bool | None = None) -> Flask:
     app = Flask(__name__)
     CORS(
         app,
@@ -48,6 +68,8 @@ def create_app() -> Flask:
 
     repository = VerdictRepository(VERDICTS_PATH)
     model_service = ModelService(MODEL_PATH, FEATURES_PATH)
+    risk_engine = RiskEngine(model_service)
+    dns_enabled = DNS_CHECK_ENABLED if enable_dns_check is None else bool(enable_dns_check)
 
     @app.get("/")
     @app.get("/health")
@@ -56,7 +78,11 @@ def create_app() -> Flask:
             "status": "ok",
             "service": "phishing-url-checker",
             "model_loaded": model_service.model is not None,
+            "model_load_error": model_service.load_error,
             "debug": API_DEBUG,
+            "dns_check_enabled": dns_enabled,
+            "verdict_base_size": repository.count(),
+            "verdict_base_stats": repository.stats(),
         })
 
     @app.post("/api/check")
@@ -65,14 +91,22 @@ def create_app() -> Flask:
         if "url" not in payload:
             return _validation_error("URL field is required", "")
         raw_url = str(payload.get("url", ""))
+        include_features = bool(payload.get("include_features", False)) and INCLUDE_DEBUG_FEATURES
+        force_dns = bool(payload.get("dns_check", False))
         try:
             normalized_url = normalize_url(raw_url)
             domain = extract_domain(normalized_url)
+            features_for_summary = extract_features(normalized_url)
             record = repository.find(normalized_url, domain)
+            dns_result = None
+            should_check_dns = dns_enabled or force_dns
+            if should_check_dns:
+                dns_result = resolve_domain(domain, DNS_TIMEOUT_SECONDS)
+
             if record:
                 verdict = record.get("verdict", "unknown")
                 logger.info("checked domain=%s verdict=%s source=database", domain, verdict)
-                return jsonify({
+                response = {
                     "verdict": verdict,
                     "source": "database",
                     "confidence": 1.0,
@@ -81,9 +115,25 @@ def create_app() -> Flask:
                     "reasons": [record.get("comment", "совпадение с внутренней базой")],
                     "normalized_url": normalized_url,
                     "domain": domain,
-                })
+                    "checks": {
+                        "ml_probability": None,
+                        "heuristic_score": None,
+                        "dns_checked": bool(dns_result and dns_result.checked),
+                        "dns_resolvable": dns_result.resolvable if dns_result else None,
+                        "model_source": None,
+                        "url_texture_model": False,
+                    },
+                    "texture_analysis": summarize_texture_features(features_for_summary),
+                }
+                if dns_result is not None:
+                    response["dns"] = dns_result.to_dict(include_addresses=False)
+                return jsonify(response)
 
-            result = model_service.predict(normalized_url, include_features=INCLUDE_DEBUG_FEATURES)
+            result = risk_engine.analyze(
+                normalized_url,
+                dns_result=dns_result,
+                include_features=include_features,
+            )
             result.update({"normalized_url": normalized_url, "domain": domain})
             logger.info("checked domain=%s verdict=%s source=%s", domain, result["verdict"], result["source"])
             return jsonify(result)
@@ -113,7 +163,17 @@ def create_app() -> Flask:
                 "error": "demo endpoint is disabled",
                 "hint": "set PHISHING_DEMO_ENDPOINTS=1 for local demonstration",
             }), 404
-        return jsonify(repository.all())
+        limit = int(request.args.get("limit", VERDICTS_SAMPLE_LIMIT))
+        offset = int(request.args.get("offset", 0))
+        full = _bool_arg("full", False)
+        if full:
+            return jsonify({"stats": repository.stats(), "items": repository.all()})
+        return jsonify({
+            "stats": repository.stats(),
+            "limit": max(0, min(limit, 250)),
+            "offset": max(0, offset),
+            "items": repository.sample(limit=limit, offset=offset),
+        })
 
     return app
 

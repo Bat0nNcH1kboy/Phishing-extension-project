@@ -11,29 +11,44 @@ function escapeHtml(value) {
 }
 
 function statusClass(data) {
-  if (data.verdict === 'phishing') return 'phishing';
+  if (data.verdict === 'phishing' || data.risk_level === 'high') return 'phishing';
   if (data.risk_level === 'medium') return 'suspicious';
   if (data.verdict === 'safe') return 'safe';
   return 'unknown';
 }
 
 function statusText(data) {
-  if (data.verdict === 'phishing') return 'Обнаружен риск фишинга';
+  if (data.verdict === 'phishing' || data.risk_level === 'high') return 'Обнаружен высокий риск фишинга';
   if (data.risk_level === 'medium') return 'Сайт требует внимания';
   if (data.verdict === 'safe') return 'Сайт выглядит безопасным';
   return 'Не удалось определить статус';
+}
+
+function percent(value) {
+  return `${Math.round(Number(value || 0) * 100)}%`;
 }
 
 function renderResult(data) {
   const result = document.getElementById('result');
   const details = document.getElementById('details');
   const reasons = Array.isArray(data.reasons) ? data.reasons : [];
+  const checks = data.checks || {};
+  const texture = data.texture_analysis || {};
+  const textureText = texture.enabled
+    ? `токены ${escapeHtml(texture.token_count || 0)}, переходы ${escapeHtml(texture.charclass_transitions || 0)}, login-маркеры ${escapeHtml(texture.login_markers || 0)}, typo-бренды ${escapeHtml(texture.brand_typo_markers || 0)}`
+    : 'не передан backend';
+  const dnsText = checks.dns_checked
+    ? (checks.dns_resolvable === true ? 'DNS: домен существует' : checks.dns_resolvable === false ? 'DNS: домен не подтверждён' : 'DNS: нет точного ответа')
+    : 'DNS: не выполнялась';
+
   result.className = `status ${statusClass(data)}`;
   result.textContent = statusText(data);
   details.innerHTML = `
-    <div><b>Источник:</b> ${escapeHtml(data.source || 'unknown')}</div>
-    <div><b>Уверенность:</b> ${Math.round(Number(data.confidence || 0) * 100)}%</div>
+    <div><span class="pill"><b>Источник:</b> ${escapeHtml(data.source || 'unknown')}</span><span class="pill"><b>Риск:</b> ${escapeHtml(data.risk_level || 'unknown')}</span></div>
+    <div><b>Уверенность:</b> ${percent(data.confidence)} · <b>Вероятность фишинга:</b> ${percent(data.phishing_probability)}</div>
     <div><b>Домен:</b> ${escapeHtml(data.domain || '-')}</div>
+    <div><b>Проверки:</b> <span class="muted">${escapeHtml(dnsText)}</span>${checks.ml_probability !== undefined && checks.ml_probability !== null ? ` · ML ${percent(checks.ml_probability)} · эвристика ${percent(checks.heuristic_score)}` : ''}${checks.url_texture_model ? ' · n-gram текстуры включены' : ''}</div>
+    <div class="texture-line"><b>Текстурный профиль URL:</b> <span class="muted">${textureText}</span></div>
     <div><b>Причины:</b>${reasons.length ? `<ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join('')}</ul>` : ' не выявлены'}</div>
   `;
 }
@@ -51,9 +66,11 @@ async function parseJsonResponse(response) {
       verdict: 'unknown',
       source: 'client',
       confidence: 0,
+      phishing_probability: 0,
       risk_level: 'unknown',
       reasons: [`backend вернул HTTP ${response.status}, но тело ответа не является JSON`],
-      domain: ''
+      domain: '',
+      checks: {}
     };
   }
 }
@@ -73,32 +90,27 @@ async function postWithTimeout(url) {
   }
 }
 
-async function checkCurrentTab() {
+function setBusy(isBusy) {
+  document.getElementById('checkCurrentBtn').disabled = isBusy;
+  document.getElementById('checkManualBtn').disabled = isBusy;
+}
+
+async function checkUrl(url) {
   const result = document.getElementById('result');
   const details = document.getElementById('details');
-  const urlBox = document.getElementById('url');
-  const button = document.getElementById('checkBtn');
-
   result.className = 'status unknown';
   result.textContent = 'Проверка...';
   details.textContent = '';
-  button.disabled = true;
+  setBusy(true);
 
   try {
-    const url = await getCurrentTabUrl();
-    urlBox.textContent = url || 'URL не определён';
     if (!url) {
       renderResult({
-        verdict: 'unknown',
-        source: 'client',
-        confidence: 0,
-        risk_level: 'unknown',
-        reasons: ['не удалось получить URL активной вкладки'],
-        domain: ''
+        verdict: 'unknown', source: 'client', confidence: 0, phishing_probability: 0,
+        risk_level: 'unknown', reasons: ['URL не указан'], domain: '', checks: {}
       });
       return;
     }
-
     const response = await postWithTimeout(url);
     const data = await parseJsonResponse(response);
     renderResult(data);
@@ -111,11 +123,24 @@ async function checkCurrentTab() {
       ? 'Проверьте, что Flask-сервер запущен на http://127.0.0.1:5001, и повторите проверку.'
       : String(error);
   } finally {
-    button.disabled = false;
+    setBusy(false);
   }
 }
 
+async function checkCurrentTab() {
+  const manual = document.getElementById('manualUrl');
+  const url = await getCurrentTabUrl();
+  manual.value = url || '';
+  await checkUrl(url);
+}
+
+async function checkManualUrl() {
+  const url = document.getElementById('manualUrl').value.trim();
+  await checkUrl(url);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('checkBtn').addEventListener('click', checkCurrentTab);
+  document.getElementById('checkCurrentBtn').addEventListener('click', checkCurrentTab);
+  document.getElementById('checkManualBtn').addEventListener('click', checkManualUrl);
   checkCurrentTab();
 });

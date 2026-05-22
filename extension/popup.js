@@ -28,28 +28,113 @@ function percent(value) {
   return `${Math.round(Number(value || 0) * 100)}%`;
 }
 
+function sourceText(value) {
+  const map = {
+    database: 'база',
+    hybrid: 'гибрид',
+    ml: 'модель',
+    ml_textured: 'модель',
+    heuristic: 'эвристика',
+    client: 'клиент',
+    error: 'ошибка',
+    unknown: 'неизвестно'
+  };
+  return map[value] || value || 'неизвестно';
+}
+
+function riskText(value) {
+  const map = {
+    low: 'низкий',
+    medium: 'средний',
+    high: 'высокий',
+    unknown: 'неизвестно'
+  };
+  return map[value] || value || 'неизвестно';
+}
+
+function reasonText(value) {
+  const map = {
+    'учебная запись безопасного домена из расширенной базы': 'Безопасный домен из базы'
+  };
+  return map[value] || value;
+}
+
+function technicalDetails(data) {
+  return {
+    dns: data.dns || data.checks || {},
+    texture_analysis: data.texture_analysis || data.texture || data.url_texture || {},
+    ml_probability: data.ml_probability ?? null,
+    heuristic_score: data.heuristic_score ?? null,
+    phishing_probability: data.phishing_probability ?? null
+  };
+}
+
+function checksText(data) {
+  const details = technicalDetails(data);
+  const checks = details.dns;
+
+  const dnsOk =
+    checks.exists === true ||
+    checks.dns_resolvable === true;
+
+  const dnsFailed =
+    checks.checked === false ||
+    checks.dns_checked === false;
+
+  if (dnsOk) {
+    return 'домен существует, подозрительных маркеров не найдено';
+  }
+
+  if (dnsFailed) {
+    return 'DNS-проверка не выполнялась';
+  }
+
+  return 'проверка выполнена';
+}
+
+function textureText(data) {
+  const details = technicalDetails(data);
+  const texture = details.texture_analysis || {};
+
+  const loginMarkers = Number(texture.login_markers || texture.login_marker_count || 0);
+  const typoBrands = Number(texture.typo_brands || texture.typo_brand_count || texture.brand_typo_markers || 0);
+
+  if (loginMarkers === 0 && typoBrands === 0) {
+    return 'признаков подмены бренда и login-маркеров не обнаружено';
+  }
+
+  const parts = [];
+
+  if (loginMarkers > 0) {
+    parts.push(`обнаружены login-маркеры: ${loginMarkers}`);
+  }
+
+  if (typoBrands > 0) {
+    parts.push(`обнаружены признаки подмены бренда: ${typoBrands}`);
+  }
+
+  return parts.join(', ');
+}
+
 function renderResult(data) {
   const result = document.getElementById('result');
   const details = document.getElementById('details');
   const reasons = Array.isArray(data.reasons) ? data.reasons : [];
-  const checks = data.checks || {};
-  const texture = data.texture_analysis || {};
-  const textureText = texture.enabled
-    ? `токены ${escapeHtml(texture.token_count || 0)}, переходы ${escapeHtml(texture.charclass_transitions || 0)}, login-маркеры ${escapeHtml(texture.login_markers || 0)}, typo-бренды ${escapeHtml(texture.brand_typo_markers || 0)}`
-    : 'не передан backend';
-  const dnsText = checks.dns_checked
-    ? (checks.dns_resolvable === true ? 'DNS: домен существует' : checks.dns_resolvable === false ? 'DNS: домен не подтверждён' : 'DNS: нет точного ответа')
-    : 'DNS: не выполнялась';
+  const technical = technicalDetails(data);
 
   result.className = `status ${statusClass(data)}`;
   result.textContent = statusText(data);
+
   details.innerHTML = `
-    <div><span class="pill"><b>Источник:</b> ${escapeHtml(data.source || 'unknown')}</span><span class="pill"><b>Риск:</b> ${escapeHtml(data.risk_level || 'unknown')}</span></div>
-    <div><b>Уверенность:</b> ${percent(data.confidence)} · <b>Вероятность фишинга:</b> ${percent(data.phishing_probability)}</div>
+    <div>
+      <span class="pill"><b>Источник:</b> ${escapeHtml(sourceText(data.source))}</span>
+      <span class="pill"><b>Риск:</b> ${escapeHtml(riskText(data.risk_level))}</span>
+    </div>
+    <div><b>Уверенность:</b> ${percent(data.confidence)} · <b>Вероятность фишинга:</b> ${percent(technical.phishing_probability)}</div>
     <div><b>Домен:</b> ${escapeHtml(data.domain || '-')}</div>
-    <div><b>Проверки:</b> <span class="muted">${escapeHtml(dnsText)}</span>${checks.ml_probability !== undefined && checks.ml_probability !== null ? ` · ML ${percent(checks.ml_probability)} · эвристика ${percent(checks.heuristic_score)}` : ''}${checks.url_texture_model ? ' · n-gram текстуры включены' : ''}</div>
-    <div class="texture-line"><b>Текстурный профиль URL:</b> <span class="muted">${textureText}</span></div>
-    <div><b>Причины:</b>${reasons.length ? `<ul>${reasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join('')}</ul>` : ' не выявлены'}</div>
+    <div><b>Проверки:</b> ${escapeHtml(checksText(data))}</div>
+    <div class="texture-line"><b>Дополнительный анализ URL:</b> ${escapeHtml(textureText(data))}</div>
+    <div><b>Причины:</b>${reasons.length ? `<ul>${reasons.map((reason) => `<li>${escapeHtml(reasonText(reason))}</li>`).join('')}</ul>` : ' не выявлены'}</div>
   `;
 }
 
@@ -67,10 +152,13 @@ async function parseJsonResponse(response) {
       source: 'client',
       confidence: 0,
       phishing_probability: 0,
+      ml_probability: 0,
+      heuristic_score: 0,
       risk_level: 'unknown',
       reasons: [`backend вернул HTTP ${response.status}, но тело ответа не является JSON`],
       domain: '',
-      checks: {}
+      checks: {},
+      texture_analysis: {}
     };
   }
 }
@@ -78,6 +166,7 @@ async function parseJsonResponse(response) {
 async function postWithTimeout(url) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
   try {
     return await fetch(API_URL, {
       method: 'POST',
@@ -98,6 +187,7 @@ function setBusy(isBusy) {
 async function checkUrl(url) {
   const result = document.getElementById('result');
   const details = document.getElementById('details');
+
   result.className = 'status unknown';
   result.textContent = 'Проверка...';
   details.textContent = '';
@@ -106,11 +196,21 @@ async function checkUrl(url) {
   try {
     if (!url) {
       renderResult({
-        verdict: 'unknown', source: 'client', confidence: 0, phishing_probability: 0,
-        risk_level: 'unknown', reasons: ['URL не указан'], domain: '', checks: {}
+        verdict: 'unknown',
+        source: 'client',
+        confidence: 0,
+        phishing_probability: 0,
+        ml_probability: 0,
+        heuristic_score: 0,
+        risk_level: 'unknown',
+        reasons: ['URL не указан'],
+        domain: '',
+        checks: {},
+        texture_analysis: {}
       });
       return;
     }
+
     const response = await postWithTimeout(url);
     const data = await parseJsonResponse(response);
     renderResult(data);
@@ -119,6 +219,7 @@ async function checkUrl(url) {
     result.textContent = error.name === 'AbortError'
       ? 'Backend не ответил за 7 секунд'
       : 'Ошибка подключения к backend';
+
     details.textContent = error.name === 'AbortError'
       ? 'Проверьте, что Flask-сервер запущен на http://127.0.0.1:5001, и повторите проверку.'
       : String(error);
